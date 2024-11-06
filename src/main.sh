@@ -6,7 +6,7 @@ set -e
 function log {
   local -r message="$1"
   local -r timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-  >&2 echo -e "${timestamp} ${message}"
+  echo >&2 -e "${timestamp} ${message}"
 }
 
 # remove ANSI color codes from argument variable
@@ -65,7 +65,8 @@ function install_terragrunt {
 # terragrunt_exit_code exit code of terragrunt command
 function run_terragrunt {
   local -r dir="$1"
-  local -r command=($2)
+  shift
+  local -a command=("$@")
 
   # terragrunt_log_file can be used later as file with execution output
   terragrunt_log_file=$(mktemp)
@@ -91,7 +92,7 @@ function comment {
   fi
   local -r escaped_message=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$/\\n/g' | tr -d '\n')
   local -r tmpfile=$(mktemp)
-  echo "{\"body\": \"$escaped_message\"}" > "$tmpfile"
+  echo "{\"body\": \"$escaped_message\"}" >"$tmpfile"
   curl -s -S -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" -d @"$tmpfile" "$comment_url"
   rm "$tmpfile"
 }
@@ -109,8 +110,8 @@ function setup_permissions {
   local -r gid="${3}"
 
   if [[ -e "${dir}" ]]; then
-      sudo chown -R "$uid:$gid" "${dir}"
-      sudo chmod -R o+rw "${dir}"
+    sudo chown -R "$uid:$gid" "${dir}"
+    sudo chmod -R o+rw "${dir}"
   fi
 }
 
@@ -126,7 +127,7 @@ function setup_pre_exec {
       pre_exec_command="${!pre_exec_var}"
       eval "$pre_exec_command"
     fi
-  done <<< "$pre_exec_vars"
+  done <<<"$pre_exec_vars"
 }
 
 # Run INPUT_POST_EXEC_* environment variables as Bash code
@@ -141,7 +142,7 @@ function setup_post_exec {
       post_exec_command="${!post_exec_var}"
       eval "$post_exec_command"
     fi
-  done <<< "$post_exec_vars"
+  done <<<"$post_exec_vars"
 }
 
 function main {
@@ -155,12 +156,12 @@ function main {
   local -r tg_add_approve=${INPUT_TG_ADD_APPROVE:-1}
   local -r tg_dir=${INPUT_TG_DIR:-.}
 
-  if [[ (-z "${tf_version}") && (-z "${tofu_version}")]]; then
+  if [[ (-z "${tf_version}") && (-z "${tofu_version}") ]]; then
     log "One of tf_version or tofu_version must be set"
     exit 1
   fi
 
-  if [[ (-n "${tf_version}") && (-n "${tofu_version}")]]; then
+  if [[ (-n "${tf_version}") && (-n "${tofu_version}") ]]; then
     log "Only one of tf_version and tofu_version may be set"
     exit 1
   fi
@@ -198,7 +199,7 @@ function main {
   install_terragrunt "${tg_version}"
 
   # add auto approve for apply and destroy commands
-  local tg_arg_and_commands="${tg_command}"
+  local -a tg_arg_and_commands=(${tg_command})
   if [[ -n "${tofu_version}" ]]; then
     log "Using OpenTofu"
     export TERRAGRUNT_TFPATH=tofu
@@ -213,13 +214,13 @@ function main {
       local approvePattern="^(apply|destroy|run-all apply|run-all destroy)"
       # split command and arguments to insert -auto-approve
       if [[ $tg_arg_and_commands =~ $approvePattern ]]; then
-          local matchedCommand="${BASH_REMATCH[0]}"
-          local remainingArgs="${tg_arg_and_commands#$matchedCommand}"
-          tg_arg_and_commands="${matchedCommand} -auto-approve ${remainingArgs}"
+        local matchedCommand="${BASH_REMATCH[0]}"
+        local remainingArgs="${tg_arg_and_commands#$matchedCommand}"
+        tg_arg_and_commands="${matchedCommand} -auto-approve ${remainingArgs}"
       fi
     fi
   fi
-  run_terragrunt "${tg_dir}" "${tg_arg_and_commands}"
+  run_terragrunt "${tg_dir}" "${tg_arg_and_commands[@]}"
   setup_permissions "${tg_dir}"
   setup_permissions "${terragrunt_log_file}"
   setup_permissions "${GITHUB_OUTPUT}"
@@ -250,11 +251,11 @@ ${terragrunt_output}
     "
   fi
 
-  echo "tg_action_exit_code=${exit_code}" >> "${GITHUB_OUTPUT}"
+  echo "tg_action_exit_code=${exit_code}" >>"${GITHUB_OUTPUT}"
 
   local tg_action_output
   tg_action_output=$(clean_multiline_text "${terragrunt_output}")
-  echo "tg_action_output=${tg_action_output}" >> "${GITHUB_OUTPUT}"
+  echo "tg_action_output=${tg_action_output}" >>"${GITHUB_OUTPUT}"
 
   exit $exit_code
 }
